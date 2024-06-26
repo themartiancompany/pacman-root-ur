@@ -1,6 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0
+#
+# Maintainer: Truocolo <truocolo@aol.com>
+# Maintainer: Pellegrino Prevete (tallero) <pellegrinoprevete@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Maintainer: Morten Linderud <foxboron@archlinux.org>
 
+_os="$( \
+  uname \
+    -o)"
+_prefix="/usr"
+if [[ "${_os}" == "Android" ]]; then 
+  _prefix="/opt"
+fi
 _pkgname=pacman
 pkgname="${_pkgname}-root"
 pkgver=6.1.0
@@ -9,9 +20,14 @@ pkgdesc="A library-based package manager with dependency support"
 arch=(
   'x86_64'
   'arm'
+  'aarch64'
+  'mips'
+  'powerpc'
 )
 url="https://www.archlinux.org/pacman/"
-license=('GPL-2.0-or-later')
+license=(
+  'GPL-2.0-or-later'
+)
 depends=(
   'bash'
   'glibc'
@@ -30,16 +46,29 @@ makedepends=(
   'asciidoc'
   'doxygen'
 )
-checkdepends=('python' 'fakechroot')
-optdepends=('perl-locale-gettext: translation support in makepkg-template')
-provides=('libalpm.so')
+checkdepends=(
+  'python'
+  'fakechroot'
+)
+optdepends=(
+  'perl-locale-gettext: translation support in makepkg-template'
+)
+provides=(
+  'libalpm.so'
+)
 backup=(
   opt/etc/pacman.conf
   opt/etc/makepkg.conf
 )
-options=('strip')
-validpgpkeys=('6645B0A8C7005E78DB1D7864F99FFE0FEAE999BD'  # Allan McRae <allan@archlinux.org>
-              'B8151B117037781095514CA7BBDFFC92306B1121') # Andrew Gregory (pacman) <andrew@archlinux.org>
+options=(
+  'strip'
+)
+validpgpkeys=(
+  # Allan McRae <allan@archlinux.org>
+  '6645B0A8C7005E78DB1D7864F99FFE0FEAE999BD'
+  # Andrew Gregory (pacman) <andrew@archlinux.org>
+  'B8151B117037781095514CA7BBDFFC92306B1121'
+)
 source=(
   https://gitlab.archlinux.org/pacman/pacman/-/releases/v$pkgver/downloads/pacman-$pkgver.tar.xz{,.sig}
   revertme-makepkg-remove-libdepends-and-libprovides.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/354a300cd26bb1c7e6551473596be5ecced921de.patch
@@ -66,14 +95,23 @@ sha256sums=(
   '2465d495cb275dce434eb3bfe4d293a223e301b968c14861aea42bc7c60404ef')
 
 prepare() {
-  cd "${_pkgname}-${pkgver}"
-
+  cd \
+    "${_pkgname}-${pkgver}"
   # handle patches
-  local -a patches
-  patches=($(printf '%s\n' "${source[@]}" | grep '.patch'))
-  patches=("${patches[@]%%::*}")
-  patches=("${patches[@]##*/}")
-
+  local \
+    -a patches
+  patches=(
+    $(printf \
+        '%s\n' \
+        "${source[@]}" | \
+        grep \
+          '.patch'))
+  patches=(
+    "${patches[@]%%::*}"
+  )
+  patches=(
+    "${patches[@]##*/}"
+  )
   if (( ${#patches[@]} != 0 )); then
     for patch in "${patches[@]}"; do
       if [[ $patch =~ revertme-* ]]; then
@@ -88,49 +126,91 @@ prepare() {
 }
 
 build() {
-  cd "${_pkgname}-$pkgver"
+  local \
+    _cflags=() \
+    _meson_opts=()
+  cd \
+    "${_pkgname}-$pkgver"
+  _cflags=(
+    "${CFLAGS}"
+    -DLINE_MAX=2048
+  )
+  _meson_opts=(
+    # TODO:
+    #   Find a way to have this
+    #   simply installed near the non-root
+    #   pacman
+    --prefix=/opt
+    --buildtype=plain
+    -Dbuildstatic=false
+    -Di18n=false
+    -Ddoc=disabled
+    -Ddoxygen=disabled
+    -Dscriptlet-shell="/data/data/com.termux/files/usr/bin/bash"
+    -Dldconfig="/data/data/com.termux/files/usr/bin/ldconfig"
+  )
   export \
-    CFLAGS="${CFLAGS} -DLINE_MAX=2048"
-  CFLAGS="${CFLAGS} -DLINE_MAX=2048" \
+    CFLAGS="${_cflags[*]}"
+  CFLAGS="${_cflags[*]}" \
   meson \
-    --prefix=/opt \
-    --buildtype=plain \
-    -Dbuildstatic=false \
-    -Di18n=false \
-    -Ddoc=disabled \
-    -Ddoxygen=disabled \
-    -Dscriptlet-shell=/usr/bin/bash \
-    -Dldconfig=/usr/bin/ldconfig \
+    "${_meson_opts[@]}" \
     build
-
-  CFLAGS="${CFLAGS} -DLINE_MAX=2048" \
-  meson compile -C build
+  CFLAGS="${_cflags[*]}" \
+  meson \
+    compile \
+    -C \
+      build
 }
 
 check() {
-  cd "${_pkgname}-$pkgver"
-
-  meson test -C build
+  cd \
+    "${_pkgname}-$pkgver"
+  meson \
+    test \
+    -C \
+      build
 }
 
 package() {
-  cd "${_pkgname}-$pkgver"
-
-  DESTDIR="$pkgdir" meson install -C build
-
-  # install Arch specific stuff
-  install -dm755 "${pkgdir}/opt/etc"
-  install -m644 "$srcdir/pacman.conf" "${pkgdir}/opt/etc"
-  install -m644 "$srcdir/makepkg.conf" "${pkgdir}/opt/etc"
-
   local \
-    wantsdir="${pkgdir}/opt/lib/systemd/system/sockets.target.wants"
-  install -dm755 "$wantsdir"
-
-  local unit
-  for unit in dirmngr gpg-agent gpg-agent-{browser,extra,ssh} keyboxd; do
-    ln -s "../${unit}@.socket" "$wantsdir/${unit}@etc-pacman.d-gnupg.socket"
+    _units=() \
+    _unit \
+    _wantsdir
+  _wantsdir="${pkgdir}${_prefix}/lib/systemd/system/sockets.target.wants"
+  _units=(
+    dirmngr
+    gpg-agent
+    gpg-agent-{browser,extra,ssh}
+    keyboxd
+  )
+  cd \
+    "${_pkgname}-$pkgver"
+  DESTDIR="${pkgdir}" \
+  meson \
+    install \
+    -C \
+      build
+  # install Arch specific stuff
+  install \
+    -dm755 \
+    "${pkgdir}${_prefix}/etc"
+  install \
+    -m644 \
+    "${srcdir}/pacman.conf" \
+    "${pkgdir}${_prefix}/etc"
+  install \
+    -m644 \
+    "${srcdir}/makepkg.conf" \
+    "${pkgdir}${_prefix}/etc"
+  install \
+    -dm755 \
+    "${_wantsdir}"
+  for _unit in "${_units[@]}"; do
+    ln \
+      -s \
+      "../${_unit}@.socket" \
+      "${_wantsdir}/${_unit}@etc-pacman.d-gnupg.socket"
   done
 }
 
-# vim: set ts=2 sw=2 etz:
+# vim: set ts=2 sw=2 et:
